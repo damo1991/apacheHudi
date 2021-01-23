@@ -62,7 +62,30 @@ object HelloHudi {
 
 
     incrementalQuery(spark, basePath, tableName)
+
+    deleteQuery(spark, basePath, tableName)
     spark.stop()
+  }
+
+  private def deleteQuery(spark: SparkSession, basePath: String, tableName: String): Unit = {
+    val deleteKeys = Seq(
+      Album(803, "", null, 0l),
+      Album(802, "", null, 0l)
+    )
+
+    import spark.implicits._
+
+    val df = deleteKeys.toDF()
+
+    df.write.format("hudi")
+      .option(DataSourceWriteOptions.TABLE_TYPE_OPT_KEY, DataSourceWriteOptions.COW_TABLE_TYPE_OPT_VAL)
+      .option(DataSourceWriteOptions.RECORDKEY_FIELD_OPT_KEY, "albumId")
+      .option(HoodieWriteConfig.TABLE_NAME, tableName)
+      .option(DataSourceWriteOptions.OPERATION_OPT_KEY, DataSourceWriteOptions.DELETE_OPERATION_OPT_VAL)
+      .mode(SaveMode.Append) // Only Append Mode is supported for Delete.
+      .save(s"$basePath/$tableName/")
+
+    spark.read.format("hudi").load(s"$basePath/$tableName/*").show()
   }
 
   private def incrementalQuery(sparkSession: SparkSession, basePath: String, tableName: String): Unit = {
