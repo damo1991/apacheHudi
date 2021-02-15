@@ -1,0 +1,1 @@
+case class Album(albumId: Long, title: String, tracks: Array[String], updateDate: Long)

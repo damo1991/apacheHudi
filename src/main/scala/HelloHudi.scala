@@ -8,11 +8,10 @@ import java.time.format.DateTimeFormatter
 
 import scala.reflect.io.Directory
 
-case class Album(albumId: Long, title: String, tracks: Array[String], updateDate: Long)
 object HelloHudi {
 
   val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
-  val basePath = "C:\\Users\\user\\Documents\\hudidata"
+  val basePath = "F:\\Hudi\\Data"
 
 
   private def dateToLong(dateString: String): Long = LocalDate.parse(dateString, formatter).toEpochDay
@@ -27,6 +26,11 @@ object HelloHudi {
     Album(800, "6 String Theory - Special", Array("Jumpin' the blues", "Bluesnote", "Birth of blues"), dateToLong("2020-01-03")),
     Album(802, "Best Of Jazz Blues", Array("Jumpin' the blues", "Bluesnote", "Birth of blues"), dateToLong("2020-01-04")),
     Album(803, "Birth of Cool", Array("Move", "Jeru", "Moon Dreams"), dateToLong("2020-02-03"))
+  )
+  private val UPSERT_ALBUM_DATA_2 = Seq(
+    Album(801, "801 String Theory - Special", Array("Jumpin' the blues", "Bluesnote", "Birth of blues"), dateToLong("2020-01-03")),
+    Album(803, "803 Best Of Jazz Blues", Array("Jumpin' the blues", "Bluesnote", "Birth of blues"), dateToLong("2020-01-04")),
+    Album(804, "804 Birth of Cool", Array("Move", "Jeru", "Moon Dreams"), dateToLong("2020-02-03"))
   )
 
   private def upsert(albumDf: DataFrame, tableName: String, key: String, combineKey: String): Unit = {
@@ -43,7 +47,7 @@ object HelloHudi {
   }
 
   def main(args: Array[String]) {
-    clearDirectory()
+    //clearDirectory()
 
     val spark: SparkSession = SparkSession.builder().appName("hudi-datalake")
       .master("local[*]")
@@ -54,16 +58,19 @@ object HelloHudi {
 
     import spark.implicits._
     val tableName = "Album"
-    upsert(INITIAL_ALBUM_DATA.toDF(), tableName, "albumId", "updateDate")
-    spark.read.format("hudi").load(s"$basePath/$tableName/*").show() //sanpshot-1
+    //upsert(INITIAL_ALBUM_DATA.toDF(), tableName, "albumId", "updateDate")
+    //spark.read.format("hudi").load(s"$basePath/$tableName/*").show() //sanpshot-1
 
-    upsert(UPSERT_ALBUM_DATA.toDF(), tableName, "albumId", "updateDate")
-    spark.read.format("hudi").load(s"$basePath/$tableName/*").show() //snapshot -2
+   //upsert(UPSERT_ALBUM_DATA.toDF(), tableName, "albumId", "updateDate")
+    //spark.read.format("hudi").load(s"$basePath/$tableName/*").show() //snapshot -2
+
+    //upsert(UPSERT_ALBUM_DATA_2.toDF(), tableName, "albumId", "updateDate")
+    //spark.read.format("hudi").load(s"$basePath/$tableName/*").show() //snapshot -3
 
 
-    incrementalQuery(spark, basePath, tableName)
-
-    deleteQuery(spark, basePath, tableName)
+  //  incrementalQuery(spark, basePath, tableName)
+   pointInTimeQuery(spark, basePath, tableName)
+    //deleteQuery(spark, basePath, tableName)
     spark.stop()
   }
 
@@ -89,9 +96,30 @@ object HelloHudi {
   }
 
   private def incrementalQuery(sparkSession: SparkSession, basePath: String, tableName: String): Unit = {
+    import sparkSession.implicits._
+    sparkSession.read.format("hudi").load(s"$basePath/$tableName/*").createOrReplaceTempView("hudi_Album_snapshot")
+    val commits = sparkSession.sql("select distinct(_hoodie_commit_time) as commitTime from  hudi_Album_snapshot order by commitTime").map(k => k.getString(0)).take(50)
+    print("********commit_length******"+commits.length)
+    val beginTime = commits(commits.length-2) // commit time we are interested in
+    print("********commit time*******"+beginTime)
     sparkSession.read.format("hudi")
       .option(DataSourceReadOptions.QUERY_TYPE_OPT_KEY, DataSourceReadOptions.QUERY_TYPE_INCREMENTAL_OPT_VAL)
-      .option(DataSourceReadOptions.BEGIN_INSTANTTIME_OPT_KEY, "20210122233606")
+      .option(DataSourceReadOptions.BEGIN_INSTANTTIME_OPT_KEY, beginTime)
+      .load(s"$basePath/$tableName/*").show()
+  }
+
+  private def pointInTimeQuery(sparkSession: SparkSession, basePath: String, tableName: String): Unit = {
+    import sparkSession.implicits._
+    sparkSession.read.format("hudi").load(s"$basePath/$tableName/*").createOrReplaceTempView("hudi_Album_snapshot")
+    val commits = sparkSession.sql("select distinct(_hoodie_commit_time) as commitTime from  hudi_Album_snapshot order by commitTime").map(k => k.getString(0)).take(50)
+    print("********commit_length******"+commits.length)
+    val beginTime = "000"
+    val endtime = commits(commits.length-2) // commit time we are interested in
+    print("********commit time*******"+endtime)
+    sparkSession.read.format("hudi")
+      .option(DataSourceReadOptions.QUERY_TYPE_OPT_KEY, DataSourceReadOptions.QUERY_TYPE_INCREMENTAL_OPT_VAL)
+      .option(DataSourceReadOptions.BEGIN_INSTANTTIME_OPT_KEY, beginTime)
+      .option(DataSourceReadOptions.END_INSTANTTIME_OPT_KEY, endtime)
       .load(s"$basePath/$tableName/*").show()
   }
 
